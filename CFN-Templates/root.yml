@@ -1,0 +1,560 @@
+---
+#================================================
+AWSTemplateFormatVersion: "2010-09-09"
+#================================================
+Description:
+  "This stack creates CICD Pipeline which creates the stack
+    - GitHub: code repository
+    - CodeBuild: managed continuous integration service that compiles source code, runs tests, and produces ready-to-deploy software packages
+    - CFNstack: service that used to define AWS resources as Infrastructure as Code
+    - CodePipeline: managed continuous delivery service that helps to automate release pipelines
+  "
+
+#================================================
+Metadata: 
+  AWS::CloudFormation::Interface: 
+    ParameterGroups: 
+      - Label: 
+          default: "General Configuration"
+        Parameters: 
+          - InfraStackName
+          - ApplicationName
+      - Label: 
+          default: "Code Deployment Details"
+        Parameters: 
+          - DevAccountID
+          - UatAccountID
+          - ProdAccountID
+          - DeploymentRegions
+      - Label: 
+          default: "Pipeline IAM Roles"
+        Parameters: 
+          - InfraCodeBuildServiceRoleName
+          - CodePipelineServiceRoleName
+          - CFNLintCodeBuildServiceRoleName
+          - CFNNagCodeBuildServiceRoleName
+          - StackSetAdminRoleName
+          - StackSetExecutionRoleName
+      - Label: 
+          default: "GitHub Configuration"
+        Parameters: 
+          - GitHubOwner
+          - GitHubRepo
+          - GitHubBranch
+          - GitHubAccessTokenSecretName
+          - GitHubAccessTokenSecretKey
+      - Label: 
+          default: "Source Template Path"
+        Parameters: 
+          - CFNTemplatesPath
+          - SourceIamFileName
+          - SourceRootFileName
+          - CFNParametersPath
+          - CodeBuildPath
+          - NestedTemplateBucketName
+          - NestedTemplateBucketPrefix
+
+#================================================
+Parameters:
+# --------------- Pipeline IAM Roles >>>>
+  InfraCodeBuildServiceRoleName:
+    Description: Application name
+    Type: String
+    Default: cicd_codebuild_service_role
+  CodePipelineServiceRoleName:
+    Description: Application name
+    Type: String
+    Default: cicd_codepipeline_service_role
+  CFNLintCodeBuildServiceRoleName:
+    Description: CodeDeployServiceRole Name
+    Type: String
+    Default: cicd_cfn_lint_build_role
+  CFNNagCodeBuildServiceRoleName:
+    Description: CodeDeployServiceRole Name
+    Type: String
+    Default: cicd_cfn_nag_build_role
+  StackSetAdminRoleName:
+    Description: CodeDeployServiceRole Name
+    Type: String
+    Default: AWSCloudFormationStackSetAdministrationRole
+  StackSetExecutionRoleName:
+    Description: CodeDeployServiceRole Name
+    Type: String
+    Default: AWSCloudFormationStackSetExecutionRole
+# --------------- GitHub Configuration >>>>
+  GitHubAccessTokenSecretName:
+    Description: Secret Name for the Github Access Token stored within AWS secret manager
+    AllowedPattern: "[A-Za-z0-9-]+"
+    Type: String
+  GitHubAccessTokenSecretKey:
+    Description: Secret key for the Github Access Token stored within AWS secret manager
+    AllowedPattern: "[A-Za-z0-9-]+"
+    Type: String
+  GitHubOwner:
+    Description: GitHub Owner Name
+    AllowedPattern: "[A-Za-z0-9-]+"
+    Type: String
+  GitHubRepo:
+    Description: GitHub Repo Name
+    AllowedPattern: "[A-Za-z0-9-]+"
+    Type: String
+  GitHubBranch:
+    Description: GitHub Branch Name
+    AllowedPattern: "[A-Za-z0-9-]+"
+    Type: String
+    Default: main #Modify it if required
+# --------------- Code Deployment Details >>>>
+  DevAccountID:
+    Description: Dev Account ID
+    Type: String
+    MaxLength: 12
+    MinLength: 12
+    AllowedPattern: ^(0|[1-9][0-9]*)$
+  UatAccountID:
+    Description: Dev Account ID
+    Type: String
+    MaxLength: 12
+    MinLength: 12
+    AllowedPattern: ^(0|[1-9][0-9]*)$
+  ProdAccountID:
+    Description: Prod Account ID
+    Type: String
+    MaxLength: 12
+    MinLength: 12
+    AllowedPattern: ^(0|[1-9][0-9]*)$
+  DeploymentRegions:
+    Description: List of Deployment Regions
+    Type: CommaDelimitedList
+    Default: "us-east-1, us-west-2"
+
+# --------------- General Configuration >>>>
+  ApplicationName:
+    Description: Name of application for which infrastructure is being created
+    Type: String
+    AllowedPattern: "[a-z0-9-]+"
+    Default: my-org
+  InfraStackName:
+    Description: Stack Name for the Deployed Infrastructure
+    Type: String
+    AllowedPattern: "[A-Za-z0-9-]+"
+# --------------- Source Template Path >>>>
+  CFNTemplatesPath:
+    Description: Relative path for Github folder which includes all the infrastructure CloudFormation templates (should include '/')
+    Type: String
+    Default: CFN-Templates/
+  CFNParametersPath:
+    Description: Relative path for CloudFormation templates (should include '/')
+    Type: String
+    Default: CFN-Templates/Parameters/
+  CodeBuildPath:
+    Description: Relative path for Github folder which includes buildspecs files (should include '/')
+    Type: String
+    Default: CodePipeline/
+  NestedTemplateBucketName:
+    Description: S3 bucket Name which stores all the Nested files
+    Type: String
+  NestedTemplateBucketPrefix:
+    Description: S3 bucket prefix which stores all the Nested files (should include '/')
+    Type: String
+  SourceIamFileName:
+    Description: Name of the IAM file which will create IAM roles for the infrastructure (as stored within GitHub Repo)
+    Type: String
+  SourceRootFileName:
+    Description: Name of the Root file which will deploys desired infrastructure (as stored within GitHub Repo)
+    Type: String
+#================================================
+#================================================
+Resources:
+# --------------- Artifact Bucket >>>>
+  PipelineArtifactS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties: 
+      BucketEncryption: 
+          ServerSideEncryptionConfiguration: 
+            - BucketKeyEnabled: true
+              ServerSideEncryptionByDefault:
+                  SSEAlgorithm: AES256
+      BucketName: !Sub "${AWS::AccountId}-code-build-artifact-bucket-${ApplicationName}"
+      PublicAccessBlockConfiguration: 
+          BlockPublicAcls: True
+          BlockPublicPolicy: True
+          IgnorePublicAcls: True
+          RestrictPublicBuckets: True
+      VersioningConfiguration: 
+          Status: Enabled
+      Tags:
+        - Key: Application
+          Value: !Ref ApplicationName
+        - Key: Stack
+          Value: !Sub ${AWS::StackName}
+
+# --------------- Code Build >>>>
+  GitHubToken:
+    Type: AWS::CodeBuild::SourceCredential
+    Properties: 
+      AuthType: PERSONAL_ACCESS_TOKEN
+      ServerType: GITHUB
+      Token: !Sub '{{resolve:secretsmanager:${GitHubAccessTokenSecretName}:SecretString:${GitHubAccessTokenSecretKey}}}'
+  CFNLintCodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties: 
+      Name: !Sub '${ApplicationName}-cfn-lint-code-build-project'
+      Description: CodeBuild Project to validate CloudFormation templates using cnf-python-lint
+      ServiceRole: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${CFNLintCodeBuildServiceRoleName}'
+      Artifacts:
+        Type: S3
+        Location: !Ref PipelineArtifactS3Bucket
+        Packaging: ZIP
+      Source:
+        Type: GITHUB
+        Location: !Sub 'https://github.com/${GitHubOwner}/${GitHubRepo}.git'
+        BuildSpec: |
+          version: 0.2
+          phases:
+            install:
+              commands:
+                - pip install --upgrade pip
+                - env && ls -l && python --version
+                - pip install cfn-lint
+                - cfn-lint ${CFNTemplatesPath}**/*.yml
+        Auth: 
+          Resource: !Ref GitHubToken
+          Type: OAUTH
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/python:3.6.5
+        EnvironmentVariables:
+          - Name: CFNTemplatesPath
+            Value: !Ref CFNTemplatesPath
+      Tags: 
+        - Key: Application
+          Value: !Ref ApplicationName
+        - Key: Stack
+          Value: !Sub ${AWS::StackName}
+  CFNPNagCodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${ApplicationName}-cfn-nag-code-build-project'
+      Description: CodeBuild Project to validate CloudFormation templates using CFN-Nag
+      ServiceRole: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${CFNNagCodeBuildServiceRoleName}'
+      Artifacts:
+        Type: S3
+        Location: !Ref PipelineArtifactS3Bucket
+        Packaging: ZIP
+      Source:
+        Type: GITHUB
+        Location: !Sub 'https://github.com/${GitHubOwner}/${GitHubRepo}.git'
+        BuildSpec: |
+          version: 0.2
+          phases:
+            install:
+              runtime-versions:
+                ruby: 2.6
+              commands:
+                - env && ls -l && ruby -v
+                - gem install cfn-nag
+                - cfn_nag_scan -v
+                - cfn_nag_scan --input-path $CFNTemplatesPath
+        Auth: 
+          Resource: !Ref GitHubToken
+          Type: OAUTH
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:1.0
+        EnvironmentVariables:
+          - Name: CFNTemplatesPath
+            Value: !Ref CFNTemplatesPath
+      Tags: 
+        - Key: Application
+          Value: !Ref ApplicationName
+        - Key: Stack
+          Value: !Sub ${AWS::StackName}
+  InfraDeployCodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties: 
+      Name: !Sub '${ApplicationName}-infra-deploy-code-build-project'
+      Description: CodeBuild Project to deploy infrastructure as code
+      ServiceRole: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${InfraCodeBuildServiceRoleName}'
+      Artifacts:
+        Type: S3
+        Location: !Ref PipelineArtifactS3Bucket
+        Packaging: ZIP
+      Source:
+        Type: GITHUB
+        Location: !Sub 'https://github.com/${GitHubOwner}/${GitHubRepo}.git'
+        BuildSpec: !Sub '${CodeBuildPath}/buildspec.yml'
+        Auth: 
+          Resource: !Ref GitHubToken
+          Type: OAUTH
+      Triggers:
+        Webhook: true
+        FilterGroups:
+          - - Type: EVENT
+              Pattern: 'PULL_REQUEST_CREATED, PULL_REQUEST_UPDATED, PULL_REQUEST_REOPENED'
+            - Type: BASE_REF
+              Pattern: !Sub ^refs/heads/${GitHubBranch}$
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/python:3.6.5
+        EnvironmentVariables:
+          - Name: CFNTemplatesPath
+            Value: !Ref CFNTemplatesPath
+          - Name: CodeBuildPath
+            Value: !Ref CodeBuildPath
+      Tags: 
+        - Key: Application
+          Value: !Ref ApplicationName
+        - Key: Stack
+          Value: !Sub ${AWS::StackName}
+
+# --------------- Code Pipeline >>>>
+  CodePipelineWebHook:
+    Type: AWS::CodePipeline::Webhook
+    Properties: 
+      Name: CodePipelineWebHook
+      Authentication: GITHUB_HMAC
+      AuthenticationConfiguration: 
+        SecretToken: '{{resolve:secretsmanager:GITHUB_ACCESS_TOKEN:SecretString:ACCESS_TOKEN}}'
+      Filters:
+        - JsonPath: '$.ref'
+          MatchEquals: ^refs/heads/{Branch}$
+        - JsonPath: '$.repository-name'
+          MatchEquals: '{Repo}'
+      TargetPipeline: !Ref CodePipeline
+      TargetAction: InfraSource
+      TargetPipelineVersion: !GetAtt CodePipeline.Version
+      RegisterWithThirdParty: true
+
+  CodePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties: 
+      Name: !Sub 'Code-Pipeline-${ApplicationName}'
+      RoleArn: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${CodePipelineServiceRoleName}'
+      ArtifactStore: 
+        Location: !Ref PipelineArtifactS3Bucket
+        Type: S3
+      Stages:
+        - Name: Code-Source
+          Actions:
+            - Name: InfraSource
+              RunOrder: 1
+              ActionTypeId: 
+                Category: Source
+                Owner: ThirdParty
+                Provider: GitHub
+                Version: 1
+              Configuration:
+                Owner: !Ref GitHubOwner
+                Repo: !Ref GitHubRepo
+                Branch: !Ref GitHubBranch
+                #PollforSourceChanges: false
+                OAuthToken: !Sub '{{resolve:secretsmanager:${GitHubAccessTokenSecretName}:SecretString:${GitHubAccessTokenSecretKey}}}'
+              OutputArtifacts: 
+                - Name: SourceCode
+
+        - Name: Code-Validation
+          Actions:
+            - Name: CFN-Lint
+              RunOrder: 2
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: "1"
+              Configuration:
+                ProjectName: !Ref CFNLintCodeBuildProject
+              InputArtifacts:
+                - Name: SourceCode
+              OutputArtifacts:
+                - Name: CfnLintCode
+            - Name: CFN-Nag
+              RunOrder: 2
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: "1"
+              Configuration:
+                ProjectName: !Ref CFNPNagCodeBuildProject
+              InputArtifacts:
+                - Name: SourceCode
+              OutputArtifacts:
+                - Name: CfnNagCode
+
+        - Name: Build
+          Actions:
+            - Name: InfraBuild
+              RunOrder: 3
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: '1'
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref InfraDeployCodeBuildProject
+              InputArtifacts:
+                - Name: SourceCode
+              OutputArtifacts:
+                - Name: BuildOutput
+
+        - Name: Deploy-dev
+          Actions:
+            - Name: Create-IAM-Roles
+              RunOrder: 4
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: '1'
+                Provider: CloudFormationStackSet
+              Configuration:
+                Description: "This Action deployes the required IAM Roles within DEV account"
+                StackSetName: !Sub "dev-${InfraStackName}-IAM-roles"
+                AdministrationRoleArn: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${StackSetAdminRoleName}'
+                ExecutionRoleName: !Sub '${StackSetExecutionRoleName}'
+                Capabilities: CAPABILITY_NAMED_IAM
+                TemplatePath: !Sub 'BuildOutput::${CFNTemplatesPath}${SourceIamFileName}'
+                DeploymentTargets: !Ref DevAccountID
+                Region: !Join
+                  - ','
+                  - - !Select [0, !Ref DeploymentRegions]
+                    - !Select [1, !Ref DeploymentRegions]
+              InputArtifacts:
+                - Name: BuildOutput
+            - Name: Deploy-Infrastructure
+              RunOrder: 5
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: '1'
+                Provider: CloudFormationStackSet
+              Configuration:
+                Description: "This Action deployes the required stack within DEV account in given AWS regions"
+                StackSetName: !Sub "dev-${InfraStackName}"
+                AdministrationRoleArn: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${StackSetAdminRoleName}'
+                ExecutionRoleName: !Sub '${StackSetExecutionRoleName}'
+                TemplatePath: !Sub 'BuildOutput::${CFNTemplatesPath}${SourceRootFileName}'
+                Parameters: !Sub |-
+                    BuildOutput::${CFNParametersPath}dev-parameters.txt
+                DeploymentTargets: !Ref DevAccountID
+                Region: !Join
+                  - ','
+                  - - !Select [0, !Ref DeploymentRegions]
+                    - !Select [1, !Ref DeploymentRegions]
+              InputArtifacts:
+                - Name: BuildOutput
+
+        - Name: Deploy-uat
+          Actions:
+            - Name: Approval
+              RunOrder: 6
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Provider: Manual
+                Version: '1'
+              Configuration:
+                CustomData: Do we want to proceed with deployment in UAT?
+            - Name: Create-IAM-Roles
+              RunOrder: 7
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: '1'
+                Provider: CloudFormationStackSet
+              Configuration:
+                Description: "This Action deployes the required IAM Roles within UAT account"
+                StackSetName: !Sub "dev-${InfraStackName}-IAM-roles"
+                AdministrationRoleArn: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${StackSetAdminRoleName}'
+                ExecutionRoleName: !Sub '${StackSetExecutionRoleName}'
+                Capabilities: CAPABILITY_NAMED_IAM
+                TemplatePath: !Sub 'BuildOutput::${CFNTemplatesPath}${SourceIamFileName}'
+                DeploymentTargets: !Ref UatAccountID
+                Region: !Join
+                  - ','
+                  - - !Select [0, !Ref DeploymentRegions]
+                    - !Select [1, !Ref DeploymentRegions]
+              InputArtifacts:
+                - Name: BuildOutput
+            - Name: Deploy-Infrastructure
+              RunOrder: 8
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: '1'
+                Provider: CloudFormationStackSet
+              Configuration:
+                Description: "This Action deployes the required stack within UAT account in given AWS regions"
+                StackSetName: !Sub "dev-${InfraStackName}"
+                AdministrationRoleArn: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${StackSetAdminRoleName}'
+                ExecutionRoleName: !Sub '${StackSetExecutionRoleName}'
+                TemplatePath: !Sub 'BuildOutput::${CFNTemplatesPath}${SourceRootFileName}'
+                Parameters: !Sub |-
+                    BuildOutput::${CFNParametersPath}uat-parameters.txt
+                DeploymentTargets: !Ref UatAccountID
+                Region: !Join
+                  - ','
+                  - - !Select [0, !Ref DeploymentRegions]
+                    - !Select [1, !Ref DeploymentRegions]
+              InputArtifacts:
+                - Name: BuildOutput
+
+        - Name: Deploy-prod
+          Actions:
+            - Name: Approval
+              RunOrder: 9
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Provider: Manual
+                Version: '1'
+              Configuration:
+                CustomData: Do we want to proceed with deployment in PROD?
+            - Name: Create-IAM-Roles
+              RunOrder: 10
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: '1'
+                Provider: CloudFormationStackSet
+              Configuration:
+                Description: "This Action deployes the required IAM Roles within PROD account"
+                StackSetName: !Sub "dev-${InfraStackName}-IAM-roles"
+                AdministrationRoleArn: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${StackSetAdminRoleName}'
+                ExecutionRoleName: !Sub '${StackSetExecutionRoleName}'
+                Capabilities: CAPABILITY_NAMED_IAM
+                TemplatePath: !Sub 'BuildOutput::${CFNTemplatesPath}${SourceIamFileName}'
+                DeploymentTargets: !Ref ProdAccountID
+                Region: !Join
+                  - ','
+                  - - !Select [0, !Ref DeploymentRegions]
+                    - !Select [1, !Ref DeploymentRegions]
+              InputArtifacts:
+                - Name: BuildOutput
+            - Name: Deploy-Infrastructure
+              RunOrder: 11
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: '1'
+                Provider: CloudFormationStackSet
+              Configuration:
+                Description: "This Action deployes the required stack within UAT account in given AWS regions"
+                StackSetName: !Sub "dev-${InfraStackName}"
+                AdministrationRoleArn: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${StackSetAdminRoleName}'
+                ExecutionRoleName: !Sub '${StackSetExecutionRoleName}'
+                TemplatePath: !Sub 'BuildOutput::${CFNTemplatesPath}${SourceRootFileName}'
+                Parameters: !Sub |-
+                    BuildOutput::${CFNParametersPath}prod-parameters.txt
+                DeploymentTargets: !Ref ProdAccountID
+                Region: !Join
+                  - ','
+                  - - !Select [0, !Ref DeploymentRegions]
+                    - !Select [1, !Ref DeploymentRegions]
+              InputArtifacts:
+                - Name: BuildOutput
+
+#================================================
+# <EOF>
