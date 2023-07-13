@@ -1,1 +1,244 @@
 
+---
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description:
+  This stack creates all the IAM roles required to create AWS CICD Pipleine
+
+
+Resources:
+# ------------------ cicd_codebuild_service_role =>
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties: 
+      RoleName: cicd_codebuild_service_role
+      Description: Code Build Service Role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies: 
+        - PolicyName: cicd_codebuild_service_policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Sid: AllowBuildOutputStreamingToDefaultLogGroup
+              Effect: Allow
+              Resource:
+              - arn:aws:logs:*:*:log-group:*
+              Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            - Sid: AllowS3ObjectAccessOnCodePipelineBuckets
+              Action:
+              - s3:PutObject
+              - s3:GetObject
+              - s3:GetObjectVersion
+              - s3:GetBucketAcl
+              - s3:GetBucketLocation
+              Resource: "*"
+              Effect: Allow
+            - Sid: AllowPullSourceCodeFromCodeCommit
+              Action: codecommit:GitPull
+              Resource: "*"
+              Effect: Allow
+            - Sid: AllowPushDockerImageToECR
+              Action:
+              - ecr:BatchCheckLayerAvailability
+              - ecr:CompleteLayerUpload
+              - ecr:GetAuthorizationToken
+              - ecr:InitiateLayerUpload
+              - ecr:PutImage
+              - ecr:UploadLayerPart
+              Resource: "*"
+              Effect: Allow
+            - Sid: AllowAccessCodeBuildSSMParameters
+              Effect: Allow
+              Action: ssm:GetParameters
+              Resource: arn:aws:ssm:*:*:parameter/CodeBuild/*
+            - Sid: AllowRunningBuildInVpc
+              Effect: Allow
+              Action:
+              - ec2:CreateNetworkInterface
+              - ec2:DescribeDhcpOptions
+              - ec2:DescribeNetworkInterfaces
+              - ec2:DeleteNetworkInterface
+              - ec2:DescribeSubnets
+              - ec2:DescribeSecurityGroups
+              - ec2:DescribeVpcs
+              Resource: "*"
+            - Sid: AllowBuildServiceToCreateENI
+              Effect: Allow
+              Action: ec2:CreateNetworkInterfacePermission
+              Resource: arn:aws:ec2:*:*:network-interface/*
+              Condition:
+                StringEquals:
+                  ec2:AuthorizedService: codebuild.amazonaws.com
+
+# ------------------ cfn_nag_role =>
+  CFNNagCodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: 'cicd_cfn_nag_build_role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Action:
+              - 'sts:AssumeRole'
+            Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+      Path: /
+      Policies: 
+        - PolicyName: cicd_cfn_nag_policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+            - Sid: AllowLogActions
+              Effect: "Allow"
+              Action:
+                - 'logs:CreateLogGroup'
+                - 'logs:CreateLogStream'
+                - 'logs:PutLogEvents'
+              Resource: "*"
+            - Sid: AllowS3Action
+              Effect: "Allow"
+              Action:
+                - 's3:List*'
+                - 's3:Get*'
+                - 's3:Put*'
+              Resource: '*'
+
+# ------------------ cfn_lint_role =>
+  CFNLintCodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: 'cicd_cfn_lint_build_role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Action:
+              - 'sts:AssumeRole'
+            Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+      Path: /
+      Policies: 
+        - PolicyName: cicd_cfn_lint_policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+            - Sid: AllowLogActions
+              Effect: "Allow"
+              Action:
+                - 'logs:CreateLogGroup'
+                - 'logs:CreateLogStream'
+                - 'logs:PutLogEvents'
+              Resource: "*"
+            - Sid: AllowS3Action
+              Effect: "Allow"
+              Action:
+                - 's3:List*'
+                - 's3:Get*'
+                - 's3:Put*'
+              Resource: '*'
+
+# ------------------ cicd_codepipeline_service_role =>
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties: 
+      RoleName: cicd_codepipeline_service_role
+      Description: Manage CICD Services in local account
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies: 
+        - PolicyName: cicd_codepipeline_service_policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+            - Sid: AllowCodeCommitActions
+              Action:
+              - codecommit:CancelUploadArchive
+              - codecommit:GetBranch
+              - codecommit:GetCommit
+              - codecommit:GetUploadArchiveStatus
+              - codecommit:UploadArchive
+              Resource: "*"
+              Effect: Allow
+            - Sid: AllowS3ObjectAccessOnCodePipelineBuckets
+              Action:
+              - s3:PutObject
+              - s3:GetObject
+              - s3:GetObjectVersion
+              - s3:GetBucketAcl
+              - s3:GetBucketLocation
+              Resource: "*"
+              Effect: Allow
+            - Sid: AllowCodeBuildActions
+              Action:
+              - codebuild:BatchGetBuilds
+              - codebuild:StartBuild
+              Resource: "*"
+              Effect: Allow
+            - Sid: AllowCodeDeployActions
+              Action:
+              - codedeploy:CreateDeployment
+              - codedeploy:GetApplication
+              - codedeploy:GetApplicationRevision
+              - codedeploy:GetDeployment
+              - codedeploy:GetDeploymentConfig
+              - codedeploy:RegisterApplicationRevision
+              Resource: "*"
+              Effect: Allow
+            - Sid: AllowCloudformationActions
+              Action:
+                - cloudformation:*
+              Resource: "*"
+              Effect: Allow
+            - Sid: AllowPassRoletoCFN
+              Action:
+              - iam:GetRole
+              - iam:PassRole
+              Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/*"
+              Effect: Allow
+
+
+# ------------------ StackSet_role for Admin Account =>
+  StackSetAdminiRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: AWSCloudFormationStackSetAdministrationRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudformation.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: AssumeRole-AWSCloudFormationStackSetExecutionRole
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sts:AssumeRole
+                Resource:
+                  - "arn:*:iam::*:role/AWSCloudFormationStackSetExecutionRole"
