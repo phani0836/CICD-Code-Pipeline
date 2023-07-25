@@ -1,31 +1,39 @@
-AWSTemplateFormatVersion: "2010-09-09"
+AWSTemplateFormatVersion: 2010-09-09
 Description: Template for rHealth Workflow roles and policies in Development
-
-#----------------------------------------------------PARAMETERS----------------------------------------------------------------
-#Parameters:
-    
-#-----------------------------------------------------RESOURCES---------------------------------------------------------------
-
 Resources:
   rHealthWorkflowGlueToAccessS3CloudwatchlogsDev:
-    Type: AWS::IAM::Role
+    Type: 'AWS::IAM::Role'
     Properties:
       Description: Role used by Glue for the rHealth workflow in development.
-      Path: '/'
+      Path: /
       RoleName: rhealth-etl-dev-workflow-dev
       AssumeRolePolicyDocument:
-        Version: '2012-10-17'
+        Version: 2012-10-17
         Statement:
           - Effect: Allow
             Principal:
               Service:
                 - glue.amazonaws.com
             Action:
-              - sts:AssumeRole
-      ManagedPolicyArns: 
-        - arn:aws:iam::aws:policy/SecretsManagerReadWrite
-        - arn:aws:iam::aws:policy/AWSGlueConsoleFullAccess
-        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/SecretsManagerReadWrite'
+        - 'arn:aws:iam::aws:policy/AWSGlueConsoleFullAccess'
+        - 'arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole'
       Tags:
-       - Key: Environment
-         Value: rhealth-etl-dev
+        - Key: Environment
+          Value: rhealth-etl-dev
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 789fa3b6-b123-4fbc-9e25-f63e81b02c58
+Metadata:
+  'AWS::CloudFormation::Designer':
+    789fa3b6-b123-4fbc-9e25-f63e81b02c58:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 60
+        'y': 90
+      z: 1
+      embeds: []
