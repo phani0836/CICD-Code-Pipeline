@@ -19,7 +19,7 @@ Resources:
       ManagedPolicyArns:
         - 'arn:aws:iam::aws:policy/SecretsManagerReadWrite'
         - 'arn:aws:iam::aws:policy/AWSGlueConsoleFullAccess'
-        #- 'arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole'
+        - 'arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole'
       Tags:
         - Key: Environment
           Value: rhealth-etl-dev
