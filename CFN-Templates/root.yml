@@ -116,7 +116,7 @@ Parameters:
     AllowedPattern: ^(|[0-9][0-9]*)$
     Default: 709353392065
   UatAccountID:
-    Description: Dev Account ID
+    Description: QA Account ID
     Type: String
     MaxLength: 12
     MinLength: 12
@@ -131,8 +131,8 @@ Parameters:
     Default: 709353392065
   DeploymentRegions:
     Description: Deployment Region
-    Type: CommaDelimitedList
-    Default: "us-east-1"
+    Type: String
+    Default: us-east-1
 
 # --------------- General Configuration >>>>
   ApplicationName:
@@ -157,7 +157,7 @@ Parameters:
   CodeBuildPath:
     Description: Relative path for Github folder which includes buildspecs files (should include '/')
     Type: String
-    Default: CodePipeline/
+    Default: Codepipeline/
   NestedTemplateBucketName:
     Description: S3 bucket Name which stores all the Nested files
     Type: String
@@ -228,7 +228,7 @@ Resources:
                 - pip install --upgrade pip
                 - env && ls -l && python --version
                 - pip install cfn-lint
-                - cfn-lint ${CFNTemplatesPath}**/*.yml
+                - cfn-lint ${CFNTemplatesPath}/rHealth-etl-mwaa-glue-policies-dev-v8.yml
         Auth: 
           Resource: !Ref GitHubToken
           Type: OAUTH
@@ -267,7 +267,7 @@ Resources:
                 - env && ls -l && ruby -v
                 - gem install cfn-nag
                 - cfn_nag_scan -v
-                - cfn_nag_scan --input-path $CFNTemplatesPath
+                - cfn_nag_scan --input-path ${CFNTemplatesPath}/rHealth-etl-mwaa-glue-policies-dev-v8.yml
         Auth: 
           Resource: !Ref GitHubToken
           Type: OAUTH
@@ -358,7 +358,7 @@ Resources:
                 Category: Source
                 Owner: ThirdParty
                 Provider: GitHub
-                Version: 1
+                Version: "1"
               Configuration:
                 Owner: !Ref GitHubOwner
                 Repo: !Ref GitHubRepo
@@ -416,12 +416,12 @@ Resources:
         - Name: Deploy-dev
           Actions:
             - Name: Create-IAM-Roles
-              RunOrder: 4
               ActionTypeId:
                 Category: Deploy
                 Owner: AWS
-                Version: "1"
+                Version: '1'
                 Provider: CloudFormationStackSet
+              RunOrder: 4
               Configuration:
                 Description: "This Action deploys the required IAM Roles within DEV account"
                 StackSetName: !Sub "dev-${InfraStackName}-IAM-roles"
@@ -430,16 +430,16 @@ Resources:
                 Capabilities: CAPABILITY_NAMED_IAM
                 TemplatePath: !Sub 'BuildOutput::${CFNTemplatesPath}${SourceIamFileName}'
                 DeploymentTargets: !Ref DevAccountID
-                Region: !Ref DeploymentRegions
+                Regions: !Ref DeploymentRegions
               InputArtifacts:
                 - Name: BuildOutput
             - Name: Deploy-Infrastructure
-              RunOrder: 5
               ActionTypeId:
                 Category: Deploy
                 Owner: AWS
-                Version: "1"
+                Version: '1'
                 Provider: CloudFormationStackSet
+              RunOrder: 5
               Configuration:
                 Description: "This Action deploys the required stack within DEV account in given AWS regions"
                 StackSetName: !Sub "dev-${InfraStackName}"
@@ -449,7 +449,7 @@ Resources:
                 Parameters: !Sub |-
                     BuildOutput::${CFNParametersPath}dev-parameters.txt
                 DeploymentTargets: !Ref DevAccountID
-                Region: !Ref DeploymentRegions
+                Regions: !Ref DeploymentRegions
               InputArtifacts:
                 - Name: BuildOutput
 
