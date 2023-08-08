@@ -47,6 +47,28 @@ Purpose of this CloudFormation stack is to creates CICD AWS pipeline which allow
 
 ![cicd_pipeline](./Documents/cicd_design.drawio.png)
 
+Github will establish trust relationship with AWS Code Pipeline by configuring “Personal Access Token” and storing it within AWS-Secrets-Manager for AWS-Code-Pipeline to access it
+
+User(s) will push the infrastructure code change within Github repo (main branch)
+
+It will trigger the webhook
+
+This webhook will initiate the Code Pipeline
+
+Code Pipeline will initiate the Code build
+
+Code Build stage will store the artifact within S3 bucket (after performing cfn-lint and cfn-nag validation)
+
+Code Pipeline ‘Deploy’ stage will pull the source-artifact from S3 bucket and will initiate the CloudFormation-StackSet to start deploying the infrastructure across different environments
+
+The StackSet will pull any nested CFN-template from ‘Nested-CFN bucket’ which would be required to deploy the desired infrastructure
+
+First infrastructure will be deployed within DEV (across regions)
+
+Then the infrastructure will be deployed within UAT (across regions), after the manual approval from user
+
+At last the code-change/infrastructure will be deployed within PROD (across regions), after the manual approval from user
+
 ## Roadmap
 - Depending on the use-case, modify the code to use multiple source branches to create codepipeline with multiple branches
 - Add or remove more target accounts and AWS-regions as per the use-case
