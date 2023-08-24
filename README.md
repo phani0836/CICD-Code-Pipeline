@@ -1,7 +1,7 @@
 # CICD-Code-Pipeline
 
 ## Description
-Purpose of this CFT stack is to creates CICD AWS pipeline which allows you to deploy your required-infrastructure across different AWS-accounts and AWS-regions. Along with AWS-Code-Pipeline, this solution utilizes following components:
+Purpose of this CF stack is to creates CICD AWS pipeline which allows you to deploy your required-infrastructure across different AWS-accounts and AWS-regions. Along with AWS-Code-Pipeline, this solution utilizes following components:
     - Code Source : GitHub repository
     - Code Build: AWS CodeBuild (with CFN-NAG and CFN-Lint integration for code validation)
     - Deployment: Infrastructure is deployed using CFN-Stacksets
